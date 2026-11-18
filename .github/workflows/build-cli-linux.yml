@@ -61,7 +61,13 @@ jobs:
           CRAFT_I18N_REQUIRED: "1"
         run: cargo build --release --locked -p wordcraft-cli
 
-      - name: Smoke test the binary
+      # PdfCraft pattern for a light CLI binary: strip the staged binary
+      # before packaging (measured on v0.18.1: 76 MB -> 61 MB), then smoke
+      # test the stripped binary that actually ships.
+      - name: Strip the binary (PdfCraft pattern)
+        run: strip target/release/wordcraft-cli
+
+      - name: Smoke test the stripped binary
         run: |
           ./target/release/wordcraft-cli --version
           ./target/release/wordcraft-cli --help > /dev/null
@@ -74,7 +80,7 @@ jobs:
           stage="wordcraft-cli-linux-x86_64"
           mkdir -p "dist/$stage"
           cp target/release/wordcraft-cli "dist/$stage/"
-          cp LICENSE-APACHE LICENSE-MIT "dist/$stage/"
+          cp README.md LICENSE-APACHE LICENSE-MIT NOTICE ATTRIBUTION.md "dist/$stage/"
           tar -C dist -czf "wordcraft-cli-${version}-linux-x86_64.tar.gz" "$stage"
           sha256sum "wordcraft-cli-${version}-linux-x86_64.tar.gz" > "wordcraft-cli-${version}-linux-x86_64.tar.gz.sha256"
           ls -lh "wordcraft-cli-${version}-linux-x86_64.tar.gz"
