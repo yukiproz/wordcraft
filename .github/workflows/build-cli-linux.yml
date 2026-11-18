@@ -1,0 +1,91 @@
+name: Build WordCraft CLI (Linux)
+
+# Builds the `wordcraft-cli` binary for Linux x86_64 and uploads it as a
+# workflow artifact. This is the fork's production pipeline for the CLI;
+# upstream's own release.yml builds the full GUI app bundles instead.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/wordcraft-cli/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "craft-i18n.rev"
+      - ".github/workflows/build-cli-linux.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-cli-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out WordCraft
+        uses: actions/checkout@v4
+
+      - name: Read the pinned craft-i18n revision
+        id: i18n
+        run: echo "rev=$(tr -d '[:space:]' < craft-i18n.rev)" >> "$GITHUB_OUTPUT"
+
+      # Official releases embed craft-i18n's language data (spelling and
+      # hyphenation) from CRAFT_I18N_DIR at the commit pinned in
+      # craft-i18n.rev; a build without it falls back to a reduced word list.
+      - name: Check out craft-i18n (language data, as in official releases)
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-i18n
+          ref: ${{ steps.i18n.outputs.rev }}
+          path: craft-i18n
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libfreetype-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build wordcraft-cli (release)
+        env:
+          CRAFT_I18N_DIR: ${{ github.workspace }}/craft-i18n
+          CRAFT_I18N_REQUIRED: "1"
+        run: cargo build --release --locked -p wordcraft-cli
+
+      - name: Smoke test the binary
+        run: |
+          ./target/release/wordcraft-cli --version
+          ./target/release/wordcraft-cli --help > /dev/null
+          file ./target/release/wordcraft-cli
+
+      - name: Package the binary
+        id: package
+        run: |
+          version="$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f2)"
+          stage="wordcraft-cli-linux-x86_64"
+          mkdir -p "dist/$stage"
+          cp target/release/wordcraft-cli "dist/$stage/"
+          cp LICENSE-APACHE LICENSE-MIT "dist/$stage/"
+          tar -C dist -czf "wordcraft-cli-${version}-linux-x86_64.tar.gz" "$stage"
+          sha256sum "wordcraft-cli-${version}-linux-x86_64.tar.gz" > "wordcraft-cli-${version}-linux-x86_64.tar.gz.sha256"
+          ls -lh "wordcraft-cli-${version}-linux-x86_64.tar.gz"
+          echo "tarball=wordcraft-cli-${version}-linux-x86_64.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the Linux CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordcraft-cli-linux-x86_64
+          path: |
+            ${{ steps.package.outputs.tarball }}
+            ${{ steps.package.outputs.tarball }}.sha256
+          retention-days: 90
+          if-no-files-found: error
